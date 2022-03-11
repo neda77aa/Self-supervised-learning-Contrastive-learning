@@ -162,7 +162,8 @@ if __name__ == "__main__":
               "mean": 0,
               "std": 1,
               "mode":"self_supervised",
-              "conf":conf}
+              "conf":conf,
+              "channels":3}
     traindataset = Echo(root='/AS_Neda/echonet/', split="train",**kwargs)
     # Generating dataloader
     dataloader = torch.utils.data.DataLoader(

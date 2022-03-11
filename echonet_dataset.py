@@ -18,7 +18,7 @@ class Echo(torchvision.datasets.VisionDataset):
                  length=16, period=2,
                  fixed_length=16, max_length=250,
                  clips=1,
-                 mode = "train",
+                 mode = "train", channels = 3,
                  padding = None,conf = None):
 
 
@@ -37,6 +37,7 @@ class Echo(torchvision.datasets.VisionDataset):
         self.fnames, self.outcome , self.ejection  = [], [] , []
         self.fixed_length = fixed_length
         self.padding = padding
+        self.channels = channels
 
         # Load video-level labels
         # Read csv file
@@ -156,15 +157,28 @@ class Echo(torchvision.datasets.VisionDataset):
         for t in self.target_type:
             key = self.fnames[index]
             if t == "LargeFrame":
-                target.append(video[:, self.frames[key][-1], :, :])
-                if self.mode == "self_supervised":
-                    deform = generate_pair(video[:, self.frames[key][-1], :, :],1,self.conf)
-                    deformframe.append(deform)
+                if self.channels == 3:
+                    target.append(video[:, self.frames[key][-1], :, :])
+                    if self.mode == "self_supervised":
+                        deform = generate_pair(video[:, self.frames[key][-1], :, :],1,self.conf)
+                        deformframe.append(deform)
+                if self.channels == 1:
+                    target.append(np.expand_dims(video[0, self.frames[key][-1], :, :], axis=0))
+                    if self.mode == "self_supervised":
+                        deform = generate_pair(np.expand_dims(video[0, self.frames[key][-1], :, :], axis=0),1,self.conf)
+                        deformframe.append(deform)
+                    
             elif t == "SmallFrame":
-                target.append(video[:, self.frames[key][0], :, :])
-                if self.mode == "self_supervised":
-                    deform = generate_pair(video[:, self.frames[key][-1], :, :],1,self.conf)
-                    deformframe.append(deform)
+                if self.channels == 3:
+                    target.append(video[:, self.frames[key][0], :, :])
+                    if self.mode == "self_supervised":
+                        deform = generate_pair(video[:, self.frames[key][0], :, :],1,self.conf)
+                        deformframe.append(deform)
+                if self.channels == 1:
+                    target.append(np.expand_dims(video[0, self.frames[key][0], :, :], axis=0))
+                    if self.mode == "self_supervised":
+                        deform = generate_pair(np.expand_dims(video[0, self.frames[key][0], :, :], axis=0),1,self.conf)
+                        deformframe.append(deform)
             elif t in ["LargeTrace", "SmallTrace"]:
                 if t == "LargeTrace":
                     t = self.trace[key][self.frames[key][-1]]
