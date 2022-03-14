@@ -163,12 +163,12 @@ if __name__ == "__main__":
               "std": 1,
               "mode":"self_supervised",
               "conf":conf}
-    traindataset = Echo(root='/AS_Neda/echonet/', split="train",**kwargs)
+    traindataset = Echo(root='/home/s.ayromlou/echonet/', split="train",**kwargs)
     # Generating dataloader
     dataloader = torch.utils.data.DataLoader(
         traindataset, batch_size=16, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"), drop_last=True)
 
-    valdataset = Echo(root='/AS_Neda/echonet/', split="val",**kwargs)
+    valdataset = Echo(root='/home/s.ayromlou/echonet/', split="val",**kwargs)
     valloader = torch.utils.data.DataLoader(
         valdataset, batch_size=16, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"))
 

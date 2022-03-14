@@ -95,7 +95,7 @@ def local_pixel_shuffling(x, prob=0.5):
         window = window.reshape((c,block_noise_size_z,
                                    block_noise_size_x, 
                                    block_noise_size_y))
-        image_temp[:, noise_z:noise_z+block_noise_size_z
+        image_temp[:, noise_z:noise_z+block_noise_size_z,
                       noise_x:noise_x+block_noise_size_x, 
                       noise_y:noise_y+block_noise_size_y] = window
     local_shuffling_x = image_temp
