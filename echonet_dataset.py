@@ -188,9 +188,12 @@ class Echo(torchvision.datasets.VisionDataset):
                 x = np.concatenate((x1[1:], np.flip(x2[1:])))
                 y = np.concatenate((y1[1:], np.flip(y2[1:])))
 
-                r, c = skimage.draw.polygon(np.rint(y).astype(np.int), np.rint(x).astype(np.int), (video.shape[2], video.shape[3]))
-                mask = np.zeros((video.shape[2], video.shape[3]), np.float32)
+                r, c = skimage.draw.polygon(np.rint(y).astype(np.int), np.rint(x).astype(np.int), (112, 112))
+                mask = np.zeros((112, 112), np.float32)
                 mask[r, c] = 1
+                if self.padding is not None:
+                    p = self.padding
+                    mask = np.pad(mask, ((p,p),(p,p)), mode='constant', constant_values=0)
                 target.append(torch.tensor(mask))
             else:
                 if self.split == "CLINICAL_TEST" or self.split == "EXTERNAL_TEST":
