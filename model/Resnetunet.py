@@ -105,7 +105,7 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
+    def __init__(self,block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=2, replace_stride_with_dilation=None,
                  norm_layer=None):
         super(ResNet, self).__init__()
@@ -124,7 +124,7 @@ class ResNet(nn.Module):
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.conv1 = nn.Conv2d(1, self.inplanes, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -239,6 +239,7 @@ class ResNetUNet(nn.Module):
         super(ResNetUNet, self).__init__()
 
         self.base_model = resnet18(pretrained=False)
+        print("hereee")
 
         self.base_layers = list(self.base_model.children())
         self.layer0 = nn.Sequential(*self.base_layers[0:3])  # size=(N, 64, x.H/2, x.W/2)
@@ -279,7 +280,7 @@ class ResNetUNet(nn.Module):
         self.conv_up1.apply(init_weights)
         self.conv_up0.apply(init_weights)
 
-        self.conv_original_size0 = convrelu(3, 2, 3, 1)
+        self.conv_original_size0 = convrelu(1, 2, 3, 1)
         self.conv_original_size1 = convrelu(2, 2, 3, 1)
         self.conv_original_size2 = convrelu(2 + 4, 2, 3, 1)
 
@@ -291,6 +292,7 @@ class ResNetUNet(nn.Module):
         init.kaiming_normal_(self.conv_last.weight, mode='fan_in')
 
     def forward(self, x, decode=True):
+        # print("hereeeee run forward",x.shape)
         x_original = self.conv_original_size0(x)
         x_original = self.conv_original_size1(x_original)
 
@@ -303,7 +305,9 @@ class ResNetUNet(nn.Module):
         return layer4
 
     def encode(self, x):
+        # print("hereeeee run",x.shape)
         layer0 = self.layer0(x)
+        # print(layer0.shape)
         layer1 = self.layer1(layer0)
         layer2 = self.layer2(layer1)
         layer3 = self.layer3(layer2)

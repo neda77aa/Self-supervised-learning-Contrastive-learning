@@ -56,7 +56,7 @@ def cal_dice(large_inter, large_union, small_inter, small_union):
     
 
 
-def run_epoch_self(model, dataloader, train, optim, device,config):
+def run_epoch_self(model, dataloader, train, optim, device,config,num_epoch):
     """Run one epoch of training/evaluation for segmentation.
     Args:
         model (torch.nn.Module): Model to train/evaulate.
@@ -81,8 +81,11 @@ def run_epoch_self(model, dataloader, train, optim, device,config):
                 large_frame = large_frame.to(device).float()
                 deformlarge = deformlarge.to(device).float()
                 #y_large = model(large_frame)["out"]
+                # print("deformlarge",deformlarge.shape)
                 y_large = model(deformlarge)  
-                y_small = F.normalize(y_large,dim = 1)/2+0.5
+                
+      
+                # y_small = F.normalize(y_large,dim = 1)/2+0.5
                 #y_large = norm(y_large)
                 loss_large = loss_fn(y_large,large_frame)
 
@@ -92,7 +95,7 @@ def run_epoch_self(model, dataloader, train, optim, device,config):
                 #y_small = model(small_frame)["out"]
                 y_small = model(deformsmall)
                 # Comment this if you want
-                y_small = F.normalize(y_small,dim = 1)/2+0.5
+                # y_small = F.normalize(y_small,dim = 1)/2+0.5
                 #y_small = norm(y_small)
                 loss_small = loss_fn(y_small,small_frame)
                 
@@ -114,6 +117,12 @@ def run_epoch_self(model, dataloader, train, optim, device,config):
                 # Show info on process bar
                 pbar.set_postfix_str("{:.4f},{:.4f}".format(loss.item(),total/n))
                 pbar.update()
+            vutils.save_image(torch.tensor(large_frame),'images/main'+str(num_epoch)+'.png',
+                              normalize=False, scale_each=True, nrow=int(1))
+            vutils.save_image(torch.tensor(deformlarge),'images/deformed'+str(num_epoch)+'.png',
+                              normalize=False, scale_each=True, nrow=int(1))
+            vutils.save_image(torch.tensor(y_large),'images/reconstruct'+str(num_epoch)+'.png',
+                              normalize=False, scale_each=True, nrow=int(1))
 
 
     return total/n
@@ -251,6 +260,7 @@ if __name__ == "__main__":
     from get_config_genesis import get_config
     import os
     from config import models_genesis_config
+    import torchvision.utils as vutils
     #from datasets.two_dim.NumpyDataLoader import NumpyDataSet
     apex_support = False
     import numpy as np
@@ -263,6 +273,7 @@ if __name__ == "__main__":
 
     # Get config
     conf = models_genesis_config()
+    conf.display()
     config = get_config()
     
     if config['use_wandb']:
@@ -276,27 +287,33 @@ if __name__ == "__main__":
               "std": 1,
               "mode":"self_supervised",
               "conf":conf,
-              "channels":3,
+              "channels":1,
               "padding":8}
-    traindataset = Echo(root='/AS_Neda/echonet/', split="train",**kwargs)
+    traindataset = Echo(root='/data/echonet/', split="train",**kwargs)
+    # print(traindataset.__getitem__(0)[1][0].shape)
+    # vutils.save_image(torch.tensor(traindataset.__getitem__(0)[0][1]),'main.png',
+                              # normalize=False, scale_each=True, nrow=int(1))
+    # vutils.save_image(torch.tensor(traindataset.__getitem__(0)[1][0]),'deformed.png',
+                              # normalize=False, scale_each=True, nrow=int(1))
     # Generating dataloader
     dataloader = torch.utils.data.DataLoader(
         traindataset, batch_size=16, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"), drop_last=True)
 
-    valdataset = Echo(root='/AS_Neda/echonet/', split="val",**kwargs)
+    valdataset = Echo(root='/data/echonet/', split="val",**kwargs)
     valloader = torch.utils.data.DataLoader(
         valdataset, batch_size=16, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"))
 
     if config['train_mode'] == "reconstruction":
         # Preparing Segmentation model 
-        model = ResNetUNet(3)
+        model = ResNetUNet(1)
+        # print(model)
         if device.type == "cuda":
             model = torch.nn.DataParallel(model)
         model.to(device)
 
         # Set up optimizer
-        lr=1e-5
-        weight_decay=1e-4
+        lr=1e-2
+        weight_decay=1e-3
         lr_step_period=None,
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
         if lr_step_period is None:
@@ -311,8 +328,8 @@ if __name__ == "__main__":
             for i in range(torch.cuda.device_count()):
                 torch.cuda.reset_peak_memory_stats(i)
 
-            loss = run_epoch_self(model, dataloader, True, optim, device,config)
-            valloss = run_epoch_self(model, valloader, False, optim, device,config)
+            loss = run_epoch_self(model, dataloader, True, optim, device,config,epoch)
+            valloss = run_epoch_self(model, valloader, False, optim, device,config,epoch)
             print("loss:{:.4f},val_loss:{:.4f}".format(loss,valloss))
             if valloss<best_loss:
                 best_loss = valloss

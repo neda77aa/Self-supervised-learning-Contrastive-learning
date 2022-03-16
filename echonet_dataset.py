@@ -116,10 +116,12 @@ class Echo(torchvision.datasets.VisionDataset):
 
         # Load video into np.array
         video = echonet_dataloader.utils.loadvideo(path).astype(np.float32)
+        # print(video.shape)
 
 
         # Scale pixel values from 0-255 to 0-1
-        video /= 255.0
+        video -= 32.260647
+        video /= 48.50121
         # video = np.moveaxis(video, 0, 1)
 
         # Set number of frames

@@ -2,7 +2,7 @@ def get_config():
     """Get the hyperparameter configuration."""
     config = {}
     config['mode'] = "train"
-    config['use_wandb'] = False
+    config['use_wandb'] = True
     config['use_cuda'] = True
     config['log_dir'] = "../logs"
     # Hyperparameters for dataset.
