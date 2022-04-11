@@ -106,6 +106,7 @@ def local_pixel_shuffling(x, prob=0.5):
 
 def image_in_painting(x):
     img_deps, img_rows, img_cols = x.shape
+    image_temp = copy.deepcopy(x)
     cnt = 5
     while cnt > 0 and random.random() < 0.95:
         block_noise_size_x = random.randint(img_rows // 20, img_rows // 10)
@@ -115,12 +116,12 @@ def image_in_painting(x):
         noise_y = random.randint(3, img_cols - block_noise_size_y - 3)
         # noise_z = random.randint(3, img_deps-block_noise_size_z-3)
 
-        x[0,
+        image_temp[0,
         noise_x:noise_x + block_noise_size_x,
         noise_y:noise_y + block_noise_size_y] = np.full((block_noise_size_x, block_noise_size_y),
                                                         np.random.rand(1)[0])
     # print('inpaint')    
-    return x
+    return image_temp
 
 
 def image_out_painting(x):
