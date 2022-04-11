@@ -13,7 +13,6 @@ import sys
 import pickle
 from model.conunet import SupConUnet
 from model.Resnetunet import ResNetUNet
-from model.attention_unet import AttentionUNet
 import tqdm
 import echonet_dataloader
 from echonet_dataloader import utils
@@ -26,34 +25,6 @@ import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import wandb
 torch.manual_seed(0)
-
-
-
-class FocalLoss(nn.modules.loss._WeightedLoss):
-
-    def __init__(self, gamma=0, size_average=None, ignore_index=-100,
-                 reduce=None, balance_param=1.0):
-        super(FocalLoss, self).__init__(size_average)
-        self.gamma = gamma
-        self.size_average = size_average
-        self.ignore_index = ignore_index
-        self.balance_param = balance_param
-
-    def forward(self, input, target):
-        
-        # inputs and targets are assumed to be BatchxClasses
-        assert len(input.shape) == len(target.shape)
-        assert input.size(0) == target.size(0)
-        assert input.size(1) == target.size(1)
-           
-        # compute the negative likelyhood
-        logpt = - F.binary_cross_entropy_with_logits(input, target)
-        pt = torch.exp(logpt)
-
-        # compute the loss
-        focal_loss = -( (1-pt)**self.gamma ) * logpt
-        balanced_focal_loss = self.balance_param * focal_loss
-        return balanced_focal_loss
 
 
 
@@ -82,6 +53,7 @@ def cal_dice(large_inter, large_union, small_inter, small_union):
     large_dice = 2 * large_inter.sum() / (large_union.sum() + large_inter.sum())
     small_dice = 2 * small_inter.sum() / (small_union.sum() + small_inter.sum())
     print("overall_dice = {:.4f},large_dice = {:.4f},small_dice = {:.4f}".format(overall_dice,large_dice,small_dice))
+    return overall_dice
     
 
 
@@ -112,6 +84,7 @@ def run_epoch_self(model, dataloader, train, optim, device,config,num_epoch):
                 #y_large = model(large_frame)["out"]
                 # print("deformlarge",deformlarge.shape)
                 y_large = model(deformlarge)  
+                
       
                 # y_small = F.normalize(y_large,dim = 1)/2+0.5
                 #y_large = norm(y_large)
@@ -142,17 +115,6 @@ def run_epoch_self(model, dataloader, train, optim, device,config,num_epoch):
                 # Show info on process bar
                 pbar.set_postfix_str("{:.4f},{:.4f}".format(loss.item(),total/n))
                 pbar.update()
-                
-            if config['use_wandb']:
-                if train: 
-                    wandb.log({"loss":loss,"loss_large":loss_large,"loss_small":loss_small})
-                else:
-                    wandb.log({"val_loss":loss,"val_loss_large":loss_large,"val_loss_small":loss_small})
-                    
-            
-            vutils.save_image(torch.tensor(large_frame),'/AS_Neda/EchoNet_Dataloader/images/resnet/reconstruction/main'+str(num_epoch)+'.png',normalize=False, scale_each=True, nrow=int(8))
-            vutils.save_image(torch.tensor(deformlarge),'/AS_Neda/EchoNet_Dataloader/images/resnet/reconstruction/deformed'+str(num_epoch)+'.png',normalize=False, scale_each=True, nrow=int(8))
-            vutils.save_image(torch.tensor(y_large),'/AS_Neda/EchoNet_Dataloader/images/resnet/reconstruction/reconstruct'+str(num_epoch)+'.png',normalize=False, scale_each=True, nrow=int(8))
 
 
     return total/n
@@ -190,7 +152,7 @@ def run_epoch(model, dataloader, train, optim, device,config):
     large_union_list = []
     small_inter_list = []
     small_union_list = []
-    criterion = FocalLoss(gamma=2)
+
     with torch.set_grad_enabled(train):
         with tqdm.tqdm(total=len(dataloader)) as pbar:
             for (ef,large_frame, small_frame, large_trace, small_trace),_ in dataloader:
@@ -212,7 +174,6 @@ def run_epoch(model, dataloader, train, optim, device,config):
                 y_large = model(large_frame)
                 #y_large = model(large_frame)
                 loss_large = torch.nn.functional.binary_cross_entropy_with_logits(y_large[:, 0, :, :], large_trace, reduction="sum")
-                
                 # Compute pixel intersection and union between human and computer segmentations
                 large_inter += np.logical_and(y_large[:, 0, :, :].detach().cpu().numpy() > 0., large_trace[:, :, :].detach().cpu().numpy() > 0.).sum()
                 large_union += np.logical_or(y_large[:, 0, :, :].detach().cpu().numpy() > 0., large_trace[:, :, :].detach().cpu().numpy() > 0.).sum()
@@ -256,24 +217,123 @@ def run_epoch(model, dataloader, train, optim, device,config):
     large_dice = 2 * large_inter_list.sum() / (large_union_list.sum() + large_inter_list.sum())
     small_dice = 2 * small_inter_list.sum() / (small_union_list.sum() + small_inter_list.sum())
     
-    
-    vutils.save_image(torch.tensor(large_frame),'/AS_Neda/EchoNet_Dataloader/images/resnet/segmentation/main.png',normalize=False, scale_each=True, nrow=int(8))
-    vutils.save_image(torch.tensor(y_large),'/AS_Neda/EchoNet_Dataloader/images/resnet/segmentation/seg.png',normalize=False, scale_each=True, nrow=int(8))
-    vutils.save_image(torch.tensor(large_trace.unsqueeze(1)),'/AS_Neda/EchoNet_Dataloader/images/resnet/segmentation/trace.png',normalize=False, scale_each=True, nrow=int(8))
-    
-    
-    if config['use_wandb']:
-        if train:
-            wandb.log({"segloss":total / n / 112 / 112,"overall_dice":overall_dice,"large_dice":large_dice,"small_dice":small_dice})
-        else:
-            wandb.log({"val_segloss":total / n / 112 / 112,"val_overall_dice":overall_dice,"val_large_dice":large_dice,"val_small_dice":small_dice})
-    return (total / n / 112 / 112,
-            large_inter_list,
-            large_union_list,
-            small_inter_list,
-            small_union_list,
-            )
+    return total / n / 112 / 112, overall_dice
 
+
+
+def build_optimizer(model, optimizer, learning_rate):
+    if optimizer == "sgd":
+        weight_decay=learning_rate/10
+        lr_step_period=None,
+        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=weight_decay)
+        # if lr_step_period is None:
+        #     lr_step_period = math.inf
+        #scheduler = torch.optim.lr_scheduler.StepLR(optim, lr_step_period)
+        
+        
+    elif optimizer == "adam":
+        optimizer = torch.optim.Adam(model.parameters(),
+                               lr=learning_rate)
+        
+    return optimizer #,scheduler
+
+def build_dataset(batch_size,device,conf,split='train'):
+    tasks = ['EF','SmallFrame' , 'LargeFrame', 'SmallTrace' ,'LargeTrace']
+    kwargs = {"target_type": tasks,
+              "mean": 0.,
+              "std": 1.,
+              "mode":"self_supervised",
+              "conf":conf,
+              "channels":1,
+              "padding":8}
+    dataset = Echo(root='/AS_Neda/echonet/', split="train",**kwargs)
+    # Generating dataloader
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=(split=='train'), pin_memory=(device.type == "cuda"), drop_last=(split=='train'))
+
+    return dataloader
+
+def train_self(config=None):
+    
+    # Get config
+    conf = deformation_config()
+    # Initialize a new wandb run
+    with wandb.init(config=config):
+        # If called by wandb.agent, as below,
+        # this config will be set by Sweep Controller
+        config = wandb.config
+        print(config)
+        conf.local_rate = config.local_rate
+        conf.nonlinear_rate = config.nonlinear_rate
+        conf.paint_rate = config.paint_rate
+        conf.display()
+        # Set device for computations
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+ 
+        # Preparing echonet dataset
+        trainloader = build_dataset(config.batch_size,device,conf,split='train')
+        valloader = build_dataset(config.batch_size,device,conf,split='val')
+        
+        # Preparing Segmentation model 
+        model = ResNetUNet(1)
+        # print(model)
+        if device.type == "cuda":
+            model = torch.nn.DataParallel(model)
+        model.to(device)
+
+        # Set up optimizer
+        optimizer = build_optimizer(model, config.optimizer, config.learning_rate)
+
+        for epoch in range(config.epochs):
+            print("Epoch #{}".format(epoch), flush=True)
+            loss = run_epoch_self(model, trainloader, True, optimizer, device,config,epoch)
+            valloss = run_epoch_self(model, valloader, False, optimizer, device,config,epoch)
+            wandb.log({"epoch": epoch, "loss": loss, "val_loss":valloss})  
+            
+            
+            
+
+
+def train(config=None):
+    
+    # Get config
+    conf = deformation_config()
+    # Initialize a new wandb run
+    with wandb.init(config=config):
+        # If called by wandb.agent, as below,
+        # this config will be set by Sweep Controller
+        config = wandb.config
+        print(config)
+
+        # Set device for computations
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+ 
+        # Preparing echonet dataset
+        trainloader = build_dataset(config.batch_size,device,conf,split='train')
+        valloader = build_dataset(config.batch_size,device,conf,split='val')
+        
+        # Preparing Segmentation model 
+        modelseg = ResNetUNet(1)
+        # Load best weights
+        pretrained = False
+        if pretrained:
+            checkpoint = torch.load(os.path.join("pretrained_weights/self", "checkpoint_res.pt"))
+            modelseg.load_state_dict(checkpoint['state_dict'], strict=False)
+
+        if device.type == "cuda":
+            modelseg = torch.nn.DataParallel(modelseg)
+        modelseg.to(device)
+
+        # Set up optimizer
+        optimizer = build_optimizer(modelseg, config.optimizer, config.learning_rate)
+
+        for epoch in range(config.epochs):
+            print("Epoch #{}".format(epoch), flush=True)
+            loss, overall_dice  = run_epoch(modelseg, trainloader, True, optimizer, device,config)
+            valloss, overall_dice_val = run_epoch(modelseg, valloader, False, optimizer, device,config)
+
+            wandb.log({"epoch": epoch, "loss": loss, "val_loss":valloss, "dice" :overall_dice, "val_dice":overall_dice_val}) 
+            
+            
 
 
 
@@ -304,136 +364,69 @@ if __name__ == "__main__":
     # GPUs
     os.environ["CUDA_VISIBLE_DEVICES"] = "7,5"
 
-    # Set device for computations
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Get config
     conf = deformation_config()
-    conf.display()
+    #conf.display()
     config = get_config()
     
 
-    # Preparing echinet dataset
-    tasks = ['EF','SmallFrame' , 'LargeFrame', 'SmallTrace' ,'LargeTrace']
-    kwargs = {"target_type": tasks,
-              "mean": 0.,
-              "std": 1.,
-              "mode":"self_supervised",
-              "conf":conf,
-              "channels":1,
-              "padding":8}
-    traindataset = Echo(root='/AS_Neda/echonet/', split="train",**kwargs)
-    # print(traindataset.__getitem__(0)[1][0].shape)
-    # vutils.save_image(torch.tensor(traindataset.__getitem__(0)[0][1]),'main.png',
-                              # normalize=False, scale_each=True, nrow=int(1))
-    # vutils.save_image(torch.tensor(traindataset.__getitem__(0)[1][0]),'deformed.png',
-                              # normalize=False, scale_each=True, nrow=int(1))
-    # Generating dataloader
-    dataloader = torch.utils.data.DataLoader(
-        traindataset, batch_size=8, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"), drop_last=True)
-
-    valdataset = Echo(root='/AS_Neda/echonet/', split="val",**kwargs)
-    valloader = torch.utils.data.DataLoader(
-        valdataset, batch_size=8, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"))
-
+    
     if config['train_mode'] == "reconstruction":
+        sweep_config = {'method':'bayes'}
+        metric = {'name':'loss', 'goal':'minimize'}
+        sweep_config['metric'] = metric
+        parameters_dict = { 'optimizer':{
+                            'values':['sgd']  #'values':['adam','sgd']
+                            },
+                            'learning_rate' :{
+                             'values':[1e-5,1e-4,1e-3,0.005,0.0005]
+                            },
+                           'batch_size':{
+                            'values':[16]
+                            },
+                            "epochs" : {
+                              "values" : [10]
+                            },
+                            "local_rate" : {
+                                "values" : [0,0.5]
+                            },
+                            "nonlinear_rate" : {
+                               "values" : [0, 0.4]
+                            },
+                            "paint_rate" : {
+                               "values" : [0.8]
+                            },
+                          }
         
-        if config['use_wandb']:
-            run = wandb.init(project="Reconstruction_attention", entity="533r")
-            
-        # Preparing Segmentation model 
-        model = AttentionUNet()
-        # print(model)
-        if device.type == "cuda":
-            model = torch.nn.DataParallel(model)
-        model.to(device)
+        sweep_config['parameters'] = parameters_dict 
+        sweep_id = wandb.sweep(sweep_config,project="sweep", entity="533r")
+        wandb.agent(sweep_id, train_self, count=12)
 
-        # Set up optimizer
-        lr=1e-3
-        weight_decay=1e-3
-        lr_step_period=None,
-        optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
-        if lr_step_period is None:
-            lr_step_period = math.inf
-        #scheduler = torch.optim.lr_scheduler.StepLR(optim, lr_step_period)
-        best_loss = 10000
 
-        ## Self Supervised learning
-        for epoch in range(8):
-            print("Epoch #{}".format(epoch), flush=True)
-            start_time = time.time()
-            for i in range(torch.cuda.device_count()):
-                torch.cuda.reset_peak_memory_stats(i)
-
-            loss = run_epoch_self(model, dataloader, True, optim, device,config,epoch)
-            valloss = run_epoch_self(model, valloader, False, optim, device,config,epoch)
-            print("loss:{:.4f},val_loss:{:.4f}".format(loss,valloss))
-            if valloss<best_loss:
-                best_loss = valloss
-            #scheduler.step()
-        # Save checkpoint
-        save = {
-            'epoch': epoch,
-            'state_dict': model.state_dict(),
-            'loss': loss,
-            'opt_dict': optim.state_dict(),
-        }
-        torch.save(save, os.path.join("pretrained_weights/self", "checkpoint_resnet_last.pt"))
-        print('model saved')
     elif config['train_mode'] == "segmentation":
     # Finetuning for segmenation
+        sweep_config = {'method':'random'}
+        metric = {'name':'dice', 'goal':'maximize'}
+        sweep_config['metric'] = metric
+        parameters_dict = { 'optimizer':{
+                            'values':['adam','sgd']
+                            },
+                            'learning_rate' :{
+                             'values':[1e-5,1e-4,1e-3,0.005,0.0005,0.00005]
+                            },
+                           'batch_size':{
+                            'values':[16]
+                            },
+                            "epochs" : {
+                              "values" : [10]
+                            }
+                          }
+        
+        sweep_config['parameters'] = parameters_dict 
+        sweep_id = wandb.sweep(sweep_config,project="sweep_segmentation", entity="533r")
+        wandb.agent(sweep_id, train, count=6)
     
-        if config['use_wandb']:
-            run = wandb.init(project="Segmentation_attention", entity="533r")
-            
-            
-        # Preparing Segmentation model 
-        #modelseg = ResNetUNet(1)
-        modelseg = AttentionUNet()
-        
-        if device.type == "cuda":
-            modelseg = torch.nn.DataParallel(modelseg)
-        modelseg.to(device)
-        
-        # Load best weights
-        if config['pretrained']:
-            checkpoint = torch.load(os.path.join("pretrained_weights/self", "checkpoint_resnet_last.pt"))
-            modelseg.load_state_dict(checkpoint['state_dict'])
-            print('Loading weights')
-
-
-        
-         # Set up optimizer
-        lr=1e-5
-        weight_decay=1e-5
-        lr_step_period=None,
-        optim = torch.optim.SGD(modelseg.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
-        if lr_step_period is None:
-            lr_step_period = math.inf
-        #scheduler = torch.optim.lr_scheduler.StepLR(optim, lr_step_period)
-        best_loss = 1000
-
-        # Finetuning for segmenation
-        for epoch in range(20):
-            print("Epoch #{}".format(epoch), flush=True)
-            start_time = time.time()
-            for i in range(torch.cuda.device_count()):
-                torch.cuda.reset_peak_memory_stats(i)
-
-            loss, large_inter, large_union, small_inter, small_union = run_epoch(modelseg, dataloader, True, optim, device,config)
-            cal_dice(large_inter, large_union, small_inter, small_union)
-
-            valloss, val_large_inter, val_large_union, val_small_inter, val_small_union = run_epoch(modelseg, valloader, False, optim, device,config)
-            cal_dice(val_large_inter, val_large_union, val_small_inter, val_small_union)
-
-        # Save checkpoint
-        save = {
-            'epoch': epoch,
-            'state_dict': modelseg.state_dict(),
-            'loss': loss,
-            'opt_dict': optim.state_dict(),
-        }
-        torch.save(save, os.path.join("pretrained_weights/seg", "seg_20_resnet.pt"))
 
     if config['use_wandb']:
         wandb.finish()

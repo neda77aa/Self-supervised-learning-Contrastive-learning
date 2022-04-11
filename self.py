@@ -16,14 +16,15 @@ from model.Resnetunet import ResNetUNet
 import tqdm
 import echonet_dataloader
 from echonet_dataloader import utils
-from config import models_genesis_config
+from config import deformation_config
 from get_config_genesis import get_config
-from config import models_genesis_config
+from config import deformation_config
 #from datasets.two_dim.NumpyDataLoader import NumpyDataSet
 apex_support = False
 import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import wandb
+import torchvision.utils as vutils
 torch.manual_seed(0)
 
 
@@ -56,7 +57,7 @@ def cal_dice(large_inter, large_union, small_inter, small_union):
     
 
 
-def run_epoch_self(model, dataloader, train, optim, device,config):
+def run_epoch_self(model, dataloader, train, optim, device,config,num_epoch):
     """Run one epoch of training/evaluation for segmentation.
     Args:
         model (torch.nn.Module): Model to train/evaulate.
@@ -82,7 +83,6 @@ def run_epoch_self(model, dataloader, train, optim, device,config):
                 deformlarge = deformlarge.to(device).float()
                 #y_large = model(large_frame)["out"]
                 y_large = model(deformlarge)["out"]  
-                y_small = F.normalize(y_large,dim = 1)/2+0.5
                 #y_large = norm(y_large)
                 loss_large = loss_fn(y_large,large_frame)
 
@@ -91,8 +91,6 @@ def run_epoch_self(model, dataloader, train, optim, device,config):
                 deformsmall = deformsmall.to(device).float()
                 #y_small = model(small_frame)["out"]
                 y_small = model(deformsmall)["out"]
-                # Comment this if you want
-                y_small = F.normalize(y_small,dim = 1)/2+0.5
                 #y_small = norm(y_small)
                 loss_small = loss_fn(y_small,small_frame)
                 
@@ -114,9 +112,23 @@ def run_epoch_self(model, dataloader, train, optim, device,config):
                 # Show info on process bar
                 pbar.set_postfix_str("{:.4f},{:.4f}".format(loss.item(),total/n))
                 pbar.update()
+            if config['use_wandb']:
+                if train: 
+                    wandb.log({"loss":loss,"loss_large":loss_large,"loss_small":loss_small})
+                else:
+                    wandb.log({"val_loss":loss,"val_loss_large":loss_large,"val_loss_small":loss_small})
+            if not train:
+                vutils.save_image(torch.tensor(large_frame),'/AS_Neda/EchoNet_Dataloader/images/deeplab/reconstruction/main'+str(num_epoch)+'.png',
+                                  normalize=False, scale_each=True, nrow=int(8))
+                vutils.save_image(torch.tensor(deformlarge),'/AS_Neda/EchoNet_Dataloader/images/deeplab/reconstruction/deformed'+str(num_epoch)+'.png',
+                                  normalize=False, scale_each=True, nrow=int(8))
+                vutils.save_image(torch.tensor(y_large),'/AS_Neda/EchoNet_Dataloader/images/deeplab/reconstruction/reconstruct'+str(num_epoch)+'.png',
+                                      normalize=False, scale_each=True, nrow=int(8))
 
 
     return total/n
+
+
 
 
 if __name__ == "__main__":
@@ -133,27 +145,25 @@ if __name__ == "__main__":
     import os
     import echonet_dataloader
     from echonet_dataloader import utils
-    from config import models_genesis_config
     from get_config_genesis import get_config
     import os
-    from config import models_genesis_config
+    from config import deformation_config
     #from datasets.two_dim.NumpyDataLoader import NumpyDataSet
     apex_support = False
     import numpy as np
     from torch.optim.lr_scheduler import ReduceLROnPlateau
     from runepoch import run_epoch
     # GPUs
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1,7"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 
     # Set device for computations
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Get config
-    conf = models_genesis_config()
+    conf = deformation_config()
     config = get_config()
     
-    if config['use_wandb']:
-        run = wandb.init(project="533R", entity="neda77aa", config=config)
+
     
 
     # Preparing echinet dataset
@@ -174,6 +184,9 @@ if __name__ == "__main__":
         valdataset, batch_size=16, num_workers=4, shuffle=True, pin_memory=(device.type == "cuda"))
 
     if config['train_mode'] == "reconstruction":
+        
+        if config['use_wandb']:
+            run = wandb.init(project="Reconstruction", entity="533r")
         # Preparing Segmentation model 
         model = SupConSegModel(num_classes=3, mode="reconstruction")
         if device.type == "cuda":
@@ -181,7 +194,7 @@ if __name__ == "__main__":
         model.to(device)
 
         # Set up optimizer
-        lr=1e-5
+        lr=0.0005
         weight_decay=1e-4
         lr_step_period=None,
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
@@ -191,18 +204,19 @@ if __name__ == "__main__":
         best_loss = 1000
 
         ## Self Supervised learning
-        for epoch in range(150):
+        for epoch in range(10):
             print("Epoch #{}".format(epoch), flush=True)
             start_time = time.time()
             for i in range(torch.cuda.device_count()):
                 torch.cuda.reset_peak_memory_stats(i)
 
-            loss = run_epoch_self(model, dataloader, True, optim, device,config)
-            valloss = run_epoch_self(model, valloader, False, optim, device,config)
+            loss = run_epoch_self(model, dataloader, True, optim, device,config,epoch)
+            valloss = run_epoch_self(model, valloader, False, optim, device,config,epoch)
             print("loss:{:.4f},val_loss:{:.4f}".format(loss,valloss))
             if valloss<best_loss:
                 best_loss = valloss
             #scheduler.step()
+            
         # Save checkpoint
         save = {
             'epoch': epoch,
@@ -211,20 +225,34 @@ if __name__ == "__main__":
             'opt_dict': optim.state_dict(),
         }
         torch.save(save, os.path.join("pretrained_weights/self", "checkpoint.pt"))
+        print("model saved")
 
     elif config['train_mode'] == "segmentation":
     # Finetuning for segmenation
-    
+        if config['use_wandb']:
+            run = wandb.init(project="Segmentation_dif", entity="533r")
+
         # Preparing Segmentation model 
-        modelseg = SupConSegModel(num_classes=1, mode="segmentation")
+        modelseg = SupConSegModel(num_classes=3, mode="reconstruction")
+        
+        if device.type == "cuda":
+            modelseg = torch.nn.DataParallel(modelseg)
+
+        modelseg.to(device)
+        
         # Load best weights
         if config['pretrained']:
             checkpoint = torch.load(os.path.join("pretrained_weights/self", "checkpoint.pt"))
-            modelseg.load_state_dict(checkpoint['state_dict'], strict=False)
-
+            modelseg.load_state_dict(checkpoint['state_dict'], strict=True)
+            print("Checkpoint_loaded")
+        modelseg = modelseg.module
+        modelseg.classifier[-1] = torch.nn.Conv2d(modelseg.classifier[-1].in_channels, 1, kernel_size=modelseg.classifier[-1].kernel_size)
+        
         if device.type == "cuda":
             modelseg = torch.nn.DataParallel(modelseg)
+
         modelseg.to(device)
+
         
          # Set up optimizer
         lr=1e-5
@@ -237,18 +265,26 @@ if __name__ == "__main__":
         best_loss = 1000
 
         # Finetuning for segmenation
-        for epoch in range(20):
+        for epoch in range(8):
             print("Epoch #{}".format(epoch), flush=True)
             start_time = time.time()
             for i in range(torch.cuda.device_count()):
                 torch.cuda.reset_peak_memory_stats(i)
 
-            loss, large_inter, large_union, small_inter, small_union = run_epoch(modelseg, dataloader, True, optim, device,config)
+            loss, large_inter, large_union, small_inter, small_union = run_epoch(modelseg, dataloader, True, optim, device,config,epoch)
             cal_dice(large_inter, large_union, small_inter, small_union)
 
-            valloss, val_large_inter, val_large_union, val_small_inter, val_small_union = run_epoch(modelseg, valloader, False, optim, device,config)
+            valloss, val_large_inter, val_large_union, val_small_inter, val_small_union = run_epoch(modelseg, valloader, False, optim, device,config,epoch)
             cal_dice(val_large_inter, val_large_union, val_small_inter, val_small_union)
 
+        # Save checkpoint
+        save = {
+            'epoch': epoch,
+            'state_dict': modelseg.state_dict(),
+            'loss': loss,
+            'opt_dict': optim.state_dict(),
+        }
+        torch.save(save, os.path.join("pretrained_weights/seg", "seg_20_deeplabv3.pt"))
 
     if config['use_wandb']:
         wandb.finish()
