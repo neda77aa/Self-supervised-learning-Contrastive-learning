@@ -10,11 +10,13 @@ import torchvision
 import echonet_dataloader
 from echonet_dataloader.deformation.utils import *
 from echonet_dataloader.deformation.utils_image import generate_pair
+import torchvision.utils as vutils
 
 class Echo(torchvision.datasets.VisionDataset):
     def __init__(self, root=None,
                  split="train", target_type="EF",
-                 mean=0., std=1.,
+                 mean=0., 
+                 std=1.,
                  length=16, period=2,
                  fixed_length=16, max_length=250,
                  clips=1,
@@ -116,12 +118,15 @@ class Echo(torchvision.datasets.VisionDataset):
 
         # Load video into np.array
         video = echonet_dataloader.utils.loadvideo(path).astype(np.float32)
-        # print(video.shape)
 
 
-        # Scale pixel values from 0-255 to 0-1
+        # Apply normalization
         video -= 32.260647
         video /= 48.50121
+            
+            
+        # Scale pixel values from 0-255 to 0-1
+        #video /= 255.0
         # video = np.moveaxis(video, 0, 1)
 
         # Set number of frames
@@ -152,7 +157,6 @@ class Echo(torchvision.datasets.VisionDataset):
             p = self.padding
             video = np.pad(video, ((0,0),(0,0),(p,p),(p,p)), mode='constant', constant_values=0)
 
-
         # Gather targets
         target = []
         deformframe = []
@@ -161,9 +165,19 @@ class Echo(torchvision.datasets.VisionDataset):
             if t == "LargeFrame":
                 if self.channels == 3:
                     target.append(video[:, self.frames[key][-1], :, :])
+                    vutils.save_image(torch.tensor(target[2]),
+                                   '/AS_Neda/EchoNet_Dataloader/images/check/1/'+str(index)+'.png',
+                                   normalize=False, scale_each=True, nrow=int(1))
                     if self.mode == "self_supervised":
                         deform = generate_pair(video[:, self.frames[key][-1], :, :],1,self.conf)
                         deformframe.append(deform)
+                        
+                    vutils.save_image(torch.tensor(target[2]),
+                       '/AS_Neda/EchoNet_Dataloader/images/check/2/'+str(index)+'.png',
+                       normalize=False, scale_each=True, nrow=int(1))
+                    vutils.save_image(torch.tensor(deform),
+                       '/AS_Neda/EchoNet_Dataloader/images/check/3/'+str(index)+'.png',
+                       normalize=False, scale_each=True, nrow=int(1))
                 if self.channels == 1:
                     target.append(np.expand_dims(video[0, self.frames[key][-1], :, :], axis=0))
                     if self.mode == "self_supervised":
@@ -240,7 +254,7 @@ class Echo(torchvision.datasets.VisionDataset):
             return video,deform,label,target
         if self.mode == "self_supervised":
             return target,deformframe
-        elif self.mode == "simclr":
+        elif self.mode == "segmentation":
              return target
             
         return target

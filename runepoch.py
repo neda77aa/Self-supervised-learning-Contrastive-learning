@@ -14,14 +14,13 @@ import torchvision
 import tqdm
 import echonet_dataloader
 from echonet_dataloader import utils
-from config import models_genesis_config
 from get_config_genesis import get_config
 import os
-from config import models_genesis_config
+from config import deformation_config
 import torch
 import wandb
-
-def run_epoch(model, dataloader, train, optim, device,config):
+import torchvision.utils as vutils
+def run_epoch(model, dataloader, train, optim, device,config,num_epoch):
     """Run one epoch of training/evaluation for segmentation.
     Args:
         model (torch.nn.Module): Model to train/evaulate.
@@ -49,10 +48,12 @@ def run_epoch(model, dataloader, train, optim, device,config):
     large_union_list = []
     small_inter_list = []
     small_union_list = []
-
+    n = 0
     with torch.set_grad_enabled(train):
         with tqdm.tqdm(total=len(dataloader)) as pbar:
-            for (ef,large_frame, small_frame, large_trace, small_trace),_ in dataloader:
+            for (ef,small_frame,large_frame ,small_trace,large_trace),_ in dataloader:
+                n = n+1
+   
                 # Count number of pixels in/out of human segmentation
                 pos += (large_trace == 1).sum().item()
                 pos += (small_trace == 1).sum().item()
@@ -115,11 +116,20 @@ def run_epoch(model, dataloader, train, optim, device,config):
     small_dice = 2 * small_inter_list.sum() / (small_union_list.sum() + small_inter_list.sum())
     
     
+
+    
     if config['use_wandb']:
         if train:
             wandb.log({"segloss":total / n / 112 / 112,"overall_dice":overall_dice,"large_dice":large_dice,"small_dice":small_dice})
         else:
             wandb.log({"val_segloss":total / n / 112 / 112,"val_overall_dice":overall_dice,"val_large_dice":large_dice,"val_small_dice":small_dice})
+    else:
+        vutils.save_image(torch.tensor(large_frame),'/AS_Neda/EchoNet_Dataloader/images/deeplab/segmentation/main'+str(num_epoch)+'.png',
+                              normalize=False, scale_each=True, nrow=int(1))
+        vutils.save_image(torch.tensor(y_large),'/AS_Neda/EchoNet_Dataloader/images/deeplab/segmentation/seg'+str(num_epoch)+'.png',
+                                      normalize=False, scale_each=True, nrow=int(1))
+        vutils.save_image(torch.tensor(small_trace),'/AS_Neda/EchoNet_Dataloader/images/deeplab/segmentation/trace'+str(num_epoch)+'.png',
+                                      normalize=False, scale_each=True, nrow=int(1))
     return (total / n / 112 / 112,
             large_inter_list,
             large_union_list,
